@@ -24,14 +24,22 @@ import matplotlib.pyplot as plt
 # -------------------------
 # Configuration (override via env)
 # -------------------------
-BASE_URL = os.environ.get("POLY_BASE_URL", "https://api.polymarket.com")
-OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "output")
+
+from dotenv import load_dotenv
+
+# Load variables from .env into environment variables
+load_dotenv()
+
+# Read the variables
+api_key = os.getenv("POLY_API_KEY")
+BASE_URL = os.getenv("POLY_BASE_URL", "https://api.polymarket.com")
+OUTPUT_DIR = os.getenv("OUTPUT_DIR", "output")
 MARKETS_ENDPOINT = "/markets"
 FILLS_ENDPOINT = "/fills"
-PAGE_SIZE = int(os.environ.get("PAGE_SIZE", 100))
-MAX_PAGES = int(os.environ.get("MAX_PAGES", 5))
-REQUEST_TIMEOUT = int(os.environ.get("REQUEST_TIMEOUT", 15))
-SLEEP_BETWEEN_MARKETS = float(os.environ.get("SLEEP_BETWEEN_MARKETS", 0.1))
+PAGE_SIZE = int(os.getenv("PAGE_SIZE", 100))
+MAX_PAGES = int(os.getenv("MAX_PAGES", 5))
+REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", 15))
+SLEEP_BETWEEN_MARKETS = float(os.getenv("SLEEP_BETWEEN_MARKETS", 0.1))
 
 # Taxonomy and weights (adjust as needed)
 TAXONOMY = [

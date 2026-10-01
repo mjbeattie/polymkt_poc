@@ -1,8 +1,11 @@
 {
-  "name": "Python 3.12 Dev Environment",
+  "name": "Python 3.14 Dev Environment",
   "build": {
     "dockerfile": "Dockerfile"
   },
+  "runArgs": [
+    "--cap-add=NET_RAW"
+  ],
   "customizations": {
     "vscode": {
       "settings": {

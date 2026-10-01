@@ -1,6 +1,6 @@
 __pycache__/
 *.pyc
-.env
+# UNCOMMENT THIS IF A PRIVATE KEY IS IN THE FILE .env
 output/
 plots/
 .vscode/
