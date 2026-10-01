@@ -4,6 +4,7 @@
     "dockerfile": "Dockerfile",
     "context": "."
   },
+  "overrideFeatureInstall": true,
   "features": {},
   "runArgs": [
     "--dns=1.1.1.1",

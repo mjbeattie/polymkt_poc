@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/devcontainers/base:ubuntu
+FROM ubuntu:22.04
 
 # Install Python 3.12
 RUN apt-get update && \
