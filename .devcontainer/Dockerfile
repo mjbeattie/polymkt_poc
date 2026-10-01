@@ -1,44 +1,27 @@
-ARG VARIANT="3.12"
-FROM mcr.microsoft.com/devcontainers/python:1-${VARIANT}
+FROM mcr.microsoft.com/devcontainers/base:ubuntu
 
-# Update package index
-RUN apt-get update
+# Install Python 3.12
+RUN apt-get update && \
+    apt-get install -y software-properties-common && \
+    add-apt-repository ppa:deadsnakes/ppa && \
+    apt-get update && \
+    apt-get install -y python3.12 python3.12-dev python3.12-venv python3-pip
 
 # Core bash utilities
 RUN apt-get install -y \
-    bash \
-    bash-completion \
-    coreutils \
-    findutils \
-    util-linux \
-    procps \
-    grep \
-    sed \
-    awk \
-    less \
-    nano \
-    vim
+    bash bash-completion coreutils findutils util-linux procps \
+    grep sed awk less nano vim
 
 # Networking + DNS tools
 RUN apt-get install -y \
-    dnsutils \
-    iputils-ping \
-    traceroute \
-    curl \
-    wget \
-    net-tools \
-    iproute2
+    dnsutils iputils-ping traceroute curl wget net-tools iproute2
 
-# Build tools for Python packages
+# Build tools
 RUN apt-get install -y \
-    build-essential \
-    python3-dev
+    build-essential
 
-# Common utilities needed for HTTPS and packaging
+# Common utilities
 RUN apt-get install -y \
-    ca-certificates \
-    unzip \
-    tar
+    ca-certificates unzip tar
 
-# Clean up
 RUN rm -rf /var/lib/apt/lists/*
