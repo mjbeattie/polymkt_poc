@@ -1,6 +1,9 @@
 {
   "name": "Polymarket POC",
-  "image": "mcr.microsoft.com/devcontainers/python:1-3.12",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
   "features": {},
   "runArgs": [
     "--dns=1.1.1.1",
@@ -17,3 +20,4 @@
   "postCreateCommand": "pip install -r requirements.txt || true",
   "remoteUser": "vscode"
 }
+
