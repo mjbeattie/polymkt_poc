@@ -1,25 +1,19 @@
 {
-  "name": "Polymarket POC",
+  "name": "Python 3.12 Dev Environment",
   "build": {
-    "dockerfile": "Dockerfile",
-    "context": "."
+    "dockerfile": "Dockerfile"
   },
-  "overrideFeatureInstall": true,
-  "features": {},
-  "runArgs": [
-    "--dns=1.1.1.1",
-    "--dns=8.8.8.8"
-  ],
   "customizations": {
     "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python"
+      },
       "extensions": [
         "ms-python.python",
         "ms-python.vscode-pylance"
       ]
     }
   },
-  "postCreateCommand": "pip install -r requirements.txt || true",
+  "postCreateCommand": "pip install --upgrade pip && pip install -r requirements.txt",
   "remoteUser": "vscode"
 }
-
-
