@@ -1,8 +1,7 @@
 {
   "name": "Polymarket POC",
-  "build": {
-    "dockerfile": "Dockerfile"
-  },
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12",
+  "features": {},
   "runArgs": [
     "--dns=1.1.1.1",
     "--dns=8.8.8.8"

@@ -1,4 +1,4 @@
-ARG VARIANT="3"
+ARG VARIANT="3.12"
 FROM mcr.microsoft.com/devcontainers/python:1-${VARIANT}
 
 # Update package index
@@ -29,16 +29,16 @@ RUN apt-get install -y \
     net-tools \
     iproute2
 
-# Git + Git LFS
-RUN apt-get install -y \
-    git \
-    git-lfs
-
-# Python build utilities
+# Build tools for Python packages
 RUN apt-get install -y \
     build-essential \
-    python3-dev \
-    python3-venv
+    python3-dev
+
+# Common utilities needed for HTTPS and packaging
+RUN apt-get install -y \
+    ca-certificates \
+    unzip \
+    tar
 
 # Clean up
 RUN rm -rf /var/lib/apt/lists/*
