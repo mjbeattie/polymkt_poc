@@ -139,9 +139,9 @@ def search_markets_by_taxonomy(markets: List[Dict[str, Any]], taxonomy: List[str
     matches = []
     for m in markets:
         text = " ".join([
-            str(m.get("title", "")),
+            str(m.get("question", "") or m.get("title", "") or m.get("slug", "")),
             str(m.get("description", "")),
-            " ".join(m.get("tags", []) if m.get("tags") else [])
+            " ".join(m.get("tags", []) if isinstance(m.get("tags"), list) else [])
         ]).lower()
         matched_keywords = [kw for kw in taxonomy if kw.lower() in text]
         if matched_keywords:
@@ -157,13 +157,16 @@ def compute_metrics_and_scores(markets: List[Dict[str, Any]]) -> pd.DataFrame:
     for m in markets:
         market_id = m.get("id") or m.get("marketId") or m.get("slug") or None
         condition_id = m.get("conditionId") or m.get("condition_id") or None
-        title = m.get("title", "")
+        
+        # Primary fix: Polymarket uses 'question' as the market title
+        title = m.get("question") or m.get("title") or m.get("slug") or "Untitled Market"
+        
         created_at = m.get("created_at") or m.get("createdAt") or None
         price = m.get("price") or m.get("last_price") or m.get("lastPrice") or None
         volume_24h = m.get("volume_24h") or m.get("volume") or m.get("volume24h") or 0
         tags = m.get("tags", [])
         matched = m.get("_matched_keywords", [])
-
+        
         # Parse CLOB Token IDs (YES token is typically index 0)
         clob_token_id = None
         raw_tokens = m.get("clobTokenIds") or m.get("clob_token_ids")
