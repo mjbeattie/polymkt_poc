@@ -3,15 +3,15 @@
 polymkt_poc.py
 
 Robust Polymarket proof-of-concept script:
-- Uses POLY_BASE_URL env var to override API base URL
+- Queries Gamma API for market discovery
+- Queries CLOB API for historical price series
 - Writes outputs to OUTPUT_DIR (default "output")
-- Uses requests.Session with retries and backoff
-- Handles empty API responses gracefully
 - Saves results CSV and plots into OUTPUT_DIR
 """
 
 import os
 import time
+import json
 import logging
 from typing import List, Dict, Any, Optional
 
@@ -19,29 +19,31 @@ import requests
 from requests.adapters import HTTPAdapter, Retry
 import pandas as pd
 import numpy as np
+
+import matplotlib
+matplotlib.use('Agg')  # Headless backend for terminal / container environments
 import matplotlib.pyplot as plt
+
+from dotenv import load_dotenv
 
 # -------------------------
 # Configuration (override via env)
 # -------------------------
 
-from dotenv import load_dotenv
-
-# Load variables from .env into environment variables
 load_dotenv()
 
-# Read the variables
 api_key = os.getenv("POLY_API_KEY")
-BASE_URL = os.getenv("POLY_BASE_URL", "https://api.polymarket.com")
+BASE_URL = os.getenv("POLY_BASE_URL", "https://gamma-api.polymarket.com")
+DATA_BASE_URL = os.getenv("POLY_DATA_BASE_URL", "https://data-api.polymarket.com")
+CLOB_BASE_URL = os.getenv("POLY_CLOB_BASE_URL", "https://clob.polymarket.com")
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "output")
+
 MARKETS_ENDPOINT = "/markets"
-FILLS_ENDPOINT = "/fills"
 PAGE_SIZE = int(os.getenv("PAGE_SIZE", 100))
 MAX_PAGES = int(os.getenv("MAX_PAGES", 5))
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", 15))
 SLEEP_BETWEEN_MARKETS = float(os.getenv("SLEEP_BETWEEN_MARKETS", 0.1))
 
-# Taxonomy and weights (adjust as needed)
 TAXONOMY = [
     "predictive maintenance", "digital twin", "non-destructive testing", "NDT",
     "ultrasonic", "eddy current", "robotic inspection", "drone", "UAV",
@@ -57,7 +59,6 @@ KEYWORD_WEIGHTS.update({
     "robotic inspection": 1.5
 })
 
-# Ensure output directories exist
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(os.path.join(OUTPUT_DIR, "plots"), exist_ok=True)
 
@@ -121,14 +122,15 @@ def get_markets(page: int = 1, page_size: int = PAGE_SIZE) -> List[Dict[str, Any
     else:
         return []
 
-def get_fills_for_market(market_id: str, limit: int = 500) -> List[Dict[str, Any]]:
-    url = f"{BASE_URL}{FILLS_ENDPOINT}"
-    params = {"market_id": market_id, "limit": limit}
+def get_price_history(token_or_condition_id: str, interval: str = "max") -> List[Dict[str, Any]]:
+    """Fetch historical price points from CLOB API using token ID or condition ID."""
+    url = f"{CLOB_BASE_URL}/prices-history"
+    params = {"market": token_or_condition_id, "interval": interval}
     data = safe_get(url, params=params)
     if data is None:
         return []
-    if isinstance(data, dict) and "fills" in data and isinstance(data["fills"], list):
-        return data["fills"]
+    if isinstance(data, dict) and "history" in data and isinstance(data["history"], list):
+        return data["history"]
     if isinstance(data, list):
         return data
     return []
@@ -154,6 +156,7 @@ def compute_metrics_and_scores(markets: List[Dict[str, Any]]) -> pd.DataFrame:
     rows = []
     for m in markets:
         market_id = m.get("id") or m.get("marketId") or m.get("slug") or None
+        condition_id = m.get("conditionId") or m.get("condition_id") or None
         title = m.get("title", "")
         created_at = m.get("created_at") or m.get("createdAt") or None
         price = m.get("price") or m.get("last_price") or m.get("lastPrice") or None
@@ -161,73 +164,69 @@ def compute_metrics_and_scores(markets: List[Dict[str, Any]]) -> pd.DataFrame:
         tags = m.get("tags", [])
         matched = m.get("_matched_keywords", [])
 
-        fills = []
-        if market_id:
-            fills = get_fills_for_market(market_id, limit=200)
+        # Parse CLOB Token IDs (YES token is typically index 0)
+        clob_token_id = None
+        raw_tokens = m.get("clobTokenIds") or m.get("clob_token_ids")
+        if isinstance(raw_tokens, str):
+            try:
+                parsed = json.loads(raw_tokens)
+                if parsed and isinstance(parsed, list):
+                    clob_token_id = parsed[0]
+            except Exception:
+                pass
+        elif isinstance(raw_tokens, list) and raw_tokens:
+            clob_token_id = raw_tokens[0]
 
-        df_f = pd.DataFrame(fills)
-        if not df_f.empty:
-            # timestamp normalization
-            if 'created_at' in df_f.columns:
-                df_f['timestamp'] = pd.to_datetime(df_f['created_at'])
-            elif 'createdAt' in df_f.columns:
-                df_f['timestamp'] = pd.to_datetime(df_f['createdAt'])
-            else:
-                for c in df_f.columns:
-                    if 'time' in c or 'date' in c:
-                        try:
-                            df_f['timestamp'] = pd.to_datetime(df_f[c])
-                            break
-                        except Exception:
-                            continue
-            if 'timestamp' in df_f.columns:
-                df_f = df_f.sort_values('timestamp')
-            # price column normalization
-            price_col = None
-            for c in ['price', 'price_usd', 'last_price', 'lastPrice']:
-                if c in df_f.columns:
-                    price_col = c
-                    break
-            if price_col:
-                prices = df_f[price_col].astype(float)
-            else:
-                prices = pd.Series(dtype=float)
+        # Safely convert volume_24h to float
+        try:
+            vol_float = float(volume_24h) if volume_24h is not None else 0.0
+        except (ValueError, TypeError):
+            vol_float = 0.0
+
+        # Fetch history via CLOB API using token_id or condition_id
+        history = []
+        target_id = clob_token_id or condition_id
+        if target_id:
+            history = get_price_history(str(target_id))
+
+        df_f = pd.DataFrame(history)
+        if not df_f.empty and 'p' in df_f.columns:
+            prices = df_f['p'].astype(float)
             price_change_24h = (prices.iloc[-1] - prices.iloc[0]) / prices.iloc[0] if len(prices) > 1 and prices.iloc[0] != 0 else 0.0
             volatility = prices.pct_change().std() if len(prices) > 1 else 0.0
             trade_count = len(df_f)
-            avg_trade_size = df_f['size'].astype(float).mean() if 'size' in df_f.columns else np.nan
         else:
             price_change_24h = 0.0
             volatility = 0.0
             trade_count = 0
-            avg_trade_size = np.nan
 
         relevance = sum(KEYWORD_WEIGHTS.get(k, 1.0) for k in matched) / max(len(KEYWORD_WEIGHTS), 1)
-        adoption = float(price_change_24h) * np.log1p(float(volume_24h) if volume_24h else 0.0)
+        adoption = float(price_change_24h) * np.log1p(vol_float)
         text = " ".join([title, m.get("description", "")]).lower()
         disruption_indicators = ["fail", "unavailable", "disrupt", "disruption", "shortage", "ban", "regulation", "grounded"]
         disruption_flag = any(word in text for word in disruption_indicators)
         disruption_score = 1.0 if disruption_flag else 0.0
-        confidence = float(np.tanh((trade_count / 10.0) + (np.log1p(volume_24h or 0) / 10.0)))
+        confidence = float(np.tanh((trade_count / 10.0) + (np.log1p(vol_float) / 10.0)))
         composite = relevance * (adoption - disruption_score) * confidence
 
         rows.append({
             "market_id": market_id,
+            "condition_id": condition_id,
+            "clob_token_id": clob_token_id,
             "title": title,
             "matched_keywords": ", ".join(matched),
             "price": price,
-            "volume_24h": volume_24h,
+            "volume_24h": vol_float,
             "price_change_24h": price_change_24h,
             "volatility": volatility,
             "trade_count": trade_count,
-            "avg_trade_size": avg_trade_size,
             "relevance": relevance,
             "adoption": adoption,
             "disruption_score": disruption_score,
             "confidence": confidence,
             "composite_score": composite,
             "created_at": created_at,
-            "tags": ", ".join(tags) if tags else ""
+            "tags": ", ".join(tags) if isinstance(tags, list) else str(tags)
         })
 
         time.sleep(SLEEP_BETWEEN_MARKETS)
@@ -242,42 +241,50 @@ def compute_metrics_and_scores(markets: List[Dict[str, Any]]) -> pd.DataFrame:
 # -------------------------
 # Visualization helper
 # -------------------------
-def plot_market_price_series(market_id: str, title: str, save_path: Optional[str] = None):
-    fills = get_fills_for_market(market_id, limit=500)
-    df = pd.DataFrame(fills)
-    if df.empty:
-        logger.info("No fills for market %s", market_id)
+def plot_market_price_series(market_dict: Dict[str, Any], save_path: Optional[str] = None):
+    title = market_dict.get("title", "Market Price History")
+    market_id = market_dict.get("market_id")
+    condition_id = market_dict.get("condition_id")
+    clob_token_id = market_dict.get("clob_token_id")
+
+    history = []
+    for identifier in [clob_token_id, condition_id, market_id]:
+        if identifier:
+            history = get_price_history(str(identifier))
+            if history:
+                break
+
+    if not history:
+        logger.info("No price history returned for market %s (token=%s, condition=%s)", market_id, clob_token_id, condition_id)
         return
-    if 'created_at' in df.columns:
-        df['timestamp'] = pd.to_datetime(df['created_at'])
-    elif 'createdAt' in df.columns:
-        df['timestamp'] = pd.to_datetime(df['createdAt'])
+
+    df = pd.DataFrame(history)
+
+    if 't' in df.columns and 'p' in df.columns:
+        df['timestamp'] = pd.to_datetime(df['t'], unit='s', errors='coerce')
+        df['price'] = df['p'].astype(float)
+    elif 'timestamp' in df.columns and 'price' in df.columns:
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df['price'] = df['price'].astype(float)
     else:
-        for c in df.columns:
-            if 'time' in c or 'date' in c:
-                try:
-                    df['timestamp'] = pd.to_datetime(df[c])
-                    break
-                except Exception:
-                    continue
-    price_col = None
-    for c in ['price', 'price_usd', 'last_price', 'lastPrice']:
-        if c in df.columns:
-            price_col = c
-            break
-    if price_col is None or 'timestamp' not in df.columns:
-        logger.info("Insufficient data to plot market %s", market_id)
+        logger.info("Unrecognized format in price history for market %s", market_id)
         return
-    df = df.sort_values('timestamp')
+
+    df = df.dropna(subset=['timestamp', 'price']).sort_values('timestamp')
+    if df.empty:
+        logger.info("Empty time series after parsing for market %s", market_id)
+        return
+
     plt.figure(figsize=(10, 4))
-    plt.plot(df['timestamp'], df[price_col].astype(float), marker='o', linestyle='-')
+    plt.plot(df['timestamp'], df['price'], marker='', linestyle='-', color='#007acc', linewidth=2)
     plt.title(title)
     plt.xlabel("Time")
-    plt.ylabel("Price")
-    plt.grid(True)
+    plt.ylabel("Price (Probability)")
+    plt.grid(True, linestyle='--', alpha=0.6)
     plt.tight_layout()
+    
     if save_path:
-        plt.savefig(save_path)
+        plt.savefig(save_path, dpi=150)
         logger.info("Saved plot to %s", save_path)
     else:
         plt.show()
@@ -287,7 +294,7 @@ def plot_market_price_series(market_id: str, title: str, save_path: Optional[str
 # Main flow
 # -------------------------
 def main():
-    logger.info("Starting Polymarket POC (BASE_URL=%s OUTPUT_DIR=%s)", BASE_URL, OUTPUT_DIR)
+    logger.info("Starting Polymarket POC (BASE_URL=%s CLOB_URL=%s OUTPUT_DIR=%s)", BASE_URL, CLOB_BASE_URL, OUTPUT_DIR)
 
     all_markets = []
     for page in range(1, MAX_PAGES + 1):
@@ -306,8 +313,8 @@ def main():
     df_scores = compute_metrics_and_scores(matched)
     if df_scores.empty:
         logger.info("No scored markets to show. Writing empty results file.")
-        cols = ["market_id","title","matched_keywords","price","volume_24h","price_change_24h",
-                "volatility","trade_count","avg_trade_size","relevance","adoption",
+        cols = ["market_id","condition_id","clob_token_id","title","matched_keywords","price","volume_24h","price_change_24h",
+                "volatility","trade_count","relevance","adoption",
                 "disruption_score","confidence","composite_score","created_at","tags"]
         pd.DataFrame(columns=cols).to_csv(os.path.join(OUTPUT_DIR, "results_empty.csv"), index=False)
         return
@@ -316,12 +323,11 @@ def main():
     df_scores.to_csv(out_csv, index=False)
     logger.info("Wrote %s with %d rows", out_csv, len(df_scores))
 
-    # Save top N plots
     top = df_scores.head(5)
     for idx, row in top.iterrows():
         safe_name = str(row['market_id']).replace("/", "_")
         plot_path = os.path.join(OUTPUT_DIR, "plots", f"top_{idx}_{safe_name}.png")
-        plot_market_price_series(row['market_id'], row['title'], save_path=plot_path)
+        plot_market_price_series(row.to_dict(), save_path=plot_path)
 
     logger.info("Done. Check the output directory: %s", OUTPUT_DIR)
 
